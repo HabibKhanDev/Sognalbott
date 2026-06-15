@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sognalbott - Premium Trading Engine Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: system-ui, -apple-system, sans-serif; }
+        .card { background-color: #161b22; border: 1px solid #30363d; border-radius: 12px; transition: all 0.3s ease; }
+        .card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+        .stats-box { background: linear-gradient(145deg, #1f242c, #161b22); border: 1px solid #30363d; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto mb-6">
+        <div id="status-banner" class="flex justify-between items-center bg-amber-950/40 border border-amber-500/50 text-amber-400 p-4 rounded-xl shadow-lg mb-4">
+            <div class="flex items-center gap-3">
+                <span class="relative flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                </span>
+                <span class="font-bold tracking-wide uppercase text-sm" id="banner-text">SYSTEM STANDBY: WAITING FOR FUNDS</span>
+            </div>
+            <span id="engine-status-tag" class="bg-amber-500 text-slate-900 px-3 py-1 rounded-md text-xs font-black tracking-wider uppercase">
+                ENGINE: STANDBY
+            </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div class="stats-box p-6 rounded-xl text-center">
+                <p class="text-xs text-gray-400 font-bold tracking-widest uppercase mb-1">💵 Available Futures Balance</p>
+                <h2 id="balance-display" class="text-3xl font-black text-rose-500 tracking-tight">$0.00</h2>
+            </div>
+            <div class="stats-box p-6 rounded-xl text-center border-l-4 border-l-emerald-500">
+                <p class="text-xs text-gray-400 font-bold tracking-widest uppercase mb-1">✔️ Bot Target Wins</p>
+                <h2 id="wins-count" class="text-3xl font-black text-emerald-400 tracking-tight">0</h2>
+            </div>
+            <div class="stats-box p-6 rounded-xl text-center border-l-4 border-l-rose-500">
+                <p class="text-xs text-gray-400 font-bold tracking-widest uppercase mb-1">❌ Bot Stop Losses</p>
+                <h2 id="loss-count" class="text-3xl font-black text-rose-500 tracking-tight">0</h2>
+            </div>
+        </div>
+
+        <div class="p-4 bg-slate-900/80 border border-slate-700/60 rounded-xl text-xs grid grid-cols-1 md:grid-cols-3 gap-2 text-center md:text-left">
+            <div class="flex items-center justify-center md:justify-start gap-2 text-blue-400">
+                <span class="font-bold">🎯 ACTIVE MARGIN:</span>
+                <span id="current-margin-info" class="font-mono bg-blue-950 px-2 py-0.5 rounded border border-blue-800">Calculating...</span>
+            </div>
+            <div class="flex items-center justify-center md:justify-start gap-2 text-purple-400">
+                <span class="font-bold">🚀 MAX TRADES LIMIT:</span>
+                <span id="current-limit-info" class="font-mono bg-purple-950 px-2 py-0.5 rounded border border-purple-800">Calculating...</span>
+            </div>
+            <div class="flex items-center justify-center md:justify-start gap-2 text-amber-400">
+                <span class="font-bold">🚫 ANTI-BLOCK RULES:</span>
+                <span class="font-mono bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/60 text-[11px]">Only Sasta Coins (No BTC/ETH/SOL)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="scanner-grid">
+        </div>
+
+    <div class="max-w-6xl mx-auto mt-6">
+        <button onclick="resetStats()" class="w-full bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800 text-white font-black py-4 rounded-xl uppercase tracking-widest text-xs shadow-md transition duration-200">
+            ⚠️ Reset All Bot Stats & Local Data Cached
+        </button>
+    </div>
+
+    <script>
+        const API_URL = '/api';
+        
+        // Saste aur Budget friendly coins select kiye hain taake precision error na aaye
+        const trackedCoins = ['PEPE', 'SHIB', 'BONK', 'FLOKI', 'WIF', 'DOGE', 'XRP', 'ADA', 'GALA', 'MATIC'];
+        const leverage = 20;
+
+        // Sync or initialize local database cache safely
+        let stats = JSON.parse(localStorage.getItem('bot_stats')) || { wins: 0, losses: 0, activeTrades: {} };
+        if (!stats.activeTrades) stats.activeTrades = {};
+
+        // --- FULL DYNAMIC RISK MANAGEMENT MATRIX ---
+        function calculateDynamicRules(balance) {
+            if (balance <= 0) {
+                return { margin: 0, maxTrades: 0, valid: false, statusText: "Engine Paused: Add USDT" };
+            }
+
+            let margin = 0.30; 
+            let maxTrades = 3;  
+
+            if (balance <= 5) {
+                margin = 0.30; // $0.30 * 20x leverage = $6.00 Trade size (Binance Limit Passed!)
+                maxTrades = 3;
+            } else if (balance > 5 && balance <= 15) {
+                margin = 0.40;
+                maxTrades = 4;
+            } else if (balance > 15 && balance <= 30) {
+                margin = 0.60;
+                maxTrades = 6;
+            } else if (balance > 30 && balance <= 50) {
+                margin = 1.00;
+                maxTrades = 8;
+            } else if (balance > 50) {
+                margin = parseFloat((balance * 0.02).toFixed(2)); // Auto calculate 2% risk allocation 
+                maxTrades = 10; // Open trades on all coins simultaneously if alignment happens
+            }
+
+            return { margin, maxTrades, valid: true, statusText: "Engine Status: ON (Running)" };
+        }
+
+        // --- COMPLETE FRONTEND RENDER INTERFACE ---
+        function renderInterface(rules, signals = {}) {
+            const grid = document.getElementById('scanner-grid');
+            grid.innerHTML = '';
+
+            for (let coin of trackedCoins) {
+                const isTradeRunning = stats.activeTrades[coin] ? true : false;
+                const coinSignal = signals[coin] || { trend: 1, ts4: 0 };
+                
+                let statusHtml = "";
+                let cardBorder = 'border-#30363d';
+                let indicatorBadge = "";
+
+                if (isTradeRunning) {
+                    const currentTrade = stats.activeTrades[coin];
+                    const isLong = currentTrade.type === 'LONG';
+                    
+                    cardBorder = isLong ? 'border-emerald-500 ring-2 ring-emerald-500/20' : 'border-rose-500 ring-2 ring-rose-500/20';
+                    indicatorBadge = isLong ? '<span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] px-2 py-0.5 rounded font-black">LONG RUNNING</span>' : '<span class="bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] px-2 py-0.5 rounded font-black">SHORT RUNNING</span>';
+                    
+                    statusHtml = `
+                        <div class="mt-3 pt-3 border-t border-gray-800 text-xs">
+                            <div class="flex justify-between text-gray-400 mb-2">
+                                <span>Entry Price:</span>
+                                <span class="font-mono text-white font-bold">${currentTrade.entry || '0.00'}</span>
+                            </div>
+                            <div class="flex justify-between text-gray-400 mb-2">
+                                <span>Risk Margin:</span>
+                                <span class="font-mono text-white font-bold">$${currentTrade.margin || rules.margin}</span>
+                            </div>
+                            <div class="flex justify-between text-emerald-400 font-medium mb-1">
+                                <span>🚀 Target (TP):</span>
+                                <span class="font-mono">${currentTrade.tp || '0.00'}</span>
+                            </div>
+                            <div class="flex justify-between text-rose-400 font-medium">
+                                <span>🛑 Stop Loss (SL):</span>
+                                <span class="font-mono">${currentTrade.sl || '0.00'}</span>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    const isBullish = coinSignal.trend === 1;
+                    indicatorBadge = isBullish ? '<span class="text-emerald-400 font-bold text-xs">BULLISH 📈</span>' : '<span class="text-rose-400 font-bold text-xs">BEARISH 📉</span>';
+                    
+                    statusHtml = `
+                        <div class="mt-4 bg-slate-900/40 border border-gray-800/60 p-3 rounded-lg text-center">
+                            <p class="text-[11px] ${rules.valid ? 'text-gray-400 animate-pulse' : 'text-rose-500 font-black uppercase tracking-wider'}">
+                                ${rules.valid ? '⏳ SCANNING 1H CROSSOVER...' : '🛑 BOT PAUSED: DEPOSIT USDT'}
+                            </p>
+                        </div>
+                    `;
+                }
+
+                grid.innerHTML += `
+                    <div class="card p-5 flex flex-col justify-between border-2 ${cardBorder}">
+                        <div class="flex justify-between items-center mb-2">
+                            <div>
+                                <h3 class="font-black text-xl tracking-widest text-white">${coin}</h3>
+                                <p class="text-[10px] font-mono text-gray-500 mt-0.5">Binance Futures Pair</p>
+                            </div>
+                            <div class="text-right flex flex-col items-end gap-1">
+                                <span class="text-[11px] font-bold bg-gray-800 text-gray-300 px-1.5 py-0.5 rounded font-mono">${leverage}X</span>
+                                ${indicatorBadge}
+                            </div>
+                        </div>
+                        ${statusHtml}
+                    </div>
+                `;
+            }
+        }
+
+        // --- CORE CORE REAL-TIME ENGINE PIPELINE ---
+        async function syncEngine() {
+            let balance = 0.00;
+            let capturedSignals = {};
+
+            // 1. Fetch Real Live Balance from Binance
+            try {
+                const res = await fetch(`${API_URL}?action=account`);
+                if(res.ok) {
+                    const data = await res.json();
+                    balance = parseFloat(data.balance || data.availableBalance || 0.00);
+                }
+            } catch (e) {
+                console.log("Account connection engine state bypass.");
+            }
+
+            const balanceDisplay = document.getElementById('balance-display');
+            balanceDisplay.innerText = `$${balance.toFixed(2)}`;
+            
+            const rules = calculateDynamicRules(balance);
+
+            // UI Elements dynamic status updates
+            if (balance > 0) {
+                balanceDisplay.className = "text-3xl font-black text-amber-400 tracking-tight";
+                document.getElementById('status-banner').className = "flex justify-between items-center bg-emerald-900/30 border border-emerald-500 text-emerald-400 p-4 rounded-xl mb-4 shadow-lg shadow-emerald-950/20";
+                document.getElementById('engine-status-tag').className = "bg-emerald-500 text-slate-900 px-3 py-1 rounded-md text-xs font-black tracking-wider uppercase";
+                document.getElementById('engine-status-tag').innerText = "ENGINE: ACTIVE";
+                document.getElementById('banner-text').innerText = "REAL-TIME TRACKING ACTIVE: PROCESSING PINE ENGINE";
+                
+                document.getElementById('current-margin-info').innerText = `$${rules.margin.toFixed(2)} (Size: $${(rules.margin * leverage).toFixed(2)})`;
+                document.getElementById('current-limit-info').innerText = `${rules.maxTrades} Active Trades Max`;
+            } else {
+                balanceDisplay.className = "text-3xl font-black text-rose-500 tracking-tight";
+                document.getElementById('status-banner').className = "flex justify-between items-center bg-amber-900/30 border border-amber-500 text-amber-400 p-4 rounded-xl mb-4 shadow-lg shadow-amber-950/20";
+                document.getElementById('engine-status-tag').className = "bg-amber-500 text-slate-900 px-3 py-1 rounded-md text-xs font-black tracking-wider uppercase";
+                document.getElementById('engine-status-tag').innerText = "ENGINE: STANDBY";
+                document.getElementById('banner-text').innerText = "SYSTEM STANDBY: WAITING FOR FUNDS";
+                
+                document.getElementById('current-margin-info').innerText = "Insufficient Balance";
+                document.getElementById('current-limit-info').innerText = "0";
+            }
+
+            document.getElementById('wins-count').innerText = stats.wins;
+            document.getElementById('loss-count').innerText = stats.losses;
+
+            // 2. High-speed multi-threaded background fetch loop
+            await Promise.all(trackedCoins.map(async (coin) => {
+                try {
+                    const signalRes = await fetch(`${API_URL}?symbol=${coin}USDT`);
+                    if(signalRes.ok) {
+                        capturedSignals[coin] = await signalRes.json();
+                    }
+                } catch (e) {
+                    capturedSignals[coin] = { trend: 1, ts4: 0 };
+                }
+            }));
+
+            // 3. Trigger UI Interface Update
+            renderInterface(rules, capturedSignals);
+
+            // 4. Safe Mode Check: Stop execution if wallet is zero/empty
+            if (!rules.valid) return;
+
+            const currentRunningTrades = Object.keys(stats.activeTrades).length;
+            
+            for (let coin of trackedCoins) {
+                const signalData = capturedSignals[coin] || { trend: 1, ts4: 0 };
+                const isTradeRunning = stats.activeTrades[coin] ? true : false;
+
+                // Crossover Match verification matrix
+                if (currentRunningTrades < rules.maxTrades && !isTradeRunning && signalData.ts4 !== 0) {
+                    const tradeType = signalData.ts4 === 1 ? 'LONG' : 'SHORT';
+                    
+                    const orderPayload = {
+                        action: 'order',
+                        symbol: `${coin}USDT`,
+                        side: tradeType,
+                        margin: rules.margin,
+                        leverage: leverage
+                    };
+
+                    try {
+                        const orderRes = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(orderPayload)
+                        });
+                        const orderResult = await orderRes.json();
+
+                        if (orderResult.success) {
+                            stats.activeTrades[coin] = {
+                                type: tradeType,
+                                entry: orderResult.entryPrice,
+                                margin: rules.margin,
+                                tp: orderResult.tp,
+                                sl: orderResult.sl
+                            };
+                            localStorage.setItem('bot_stats', JSON.stringify(stats));
+                        }
+                    } catch (orderErr) {
+                        console.error("Binance Trade Execution Rejected.", orderErr);
+                    }
+                }
+            }
+        }
+
+        function resetStats() {
+            if(confirm("Kia aap waqai poora dashboard data aur metrics clear karna chahte hain?")) {
+                localStorage.removeItem('bot_stats');
+                stats = { wins: 0, losses: 0, activeTrades: {} };
+                syncEngine();
+            }
+        }
+
+        // Bootup initial rendering sequence
+        const initialRules = calculateDynamicRules(0.00);
+        renderInterface(initialRules);
+
+        // Core scanning speed interval setup (25 seconds loop refresh)
+        setInterval(syncEngine, 25000);
+        window.onload = syncEngine;
+    </script>
+</body>
+</html>
